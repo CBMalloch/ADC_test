@@ -49,16 +49,11 @@
 // *****************************************************************************
 
 
-// SYSTEMConfigPerformance (GetSystemClock);
-
 // *****************************************************************************
 // *****************************************************************************
 // Section: Function Prototypes
 // *****************************************************************************
 // *****************************************************************************
-void SendDataBuffer(const char *buffer, UINT32 size);
-UINT32 GetMenuChoice(void);
-UINT32 GetDataBuffer(char *buffer, UINT32 max_size);
 // *****************************************************************************
 // *****************************************************************************
 // Section: Constant Data
@@ -67,31 +62,31 @@ UINT32 GetDataBuffer(char *buffer, UINT32 max_size);
 
 volatile int programStatus;
 int clock_interrupt_period_us = 1000;
-int enableADC = 0;
-#define LED_blink_period_ms 500
-#define ADC_interval_ms     2000
+INT8 enableADC   = 0;
+INT8 enablePrint = 0;
+#define LED_blink_period_ms  200
+#define ADC_interval_ms        5
+#define print_interval_ms    500
 
+// *****************************************************************************
 // *****************************************************************************
 // Section: Code
 // *****************************************************************************
 // *****************************************************************************
 
-// *****************************************************************************
-// int main(void)
-// *****************************************************************************
 int main(void)
 {
   UINT8   strBuf[bufLen];
   UINT8   bank = 0;
-  #define NSENSORSINBANK 3
+  #define NSENSORSINBANK 4
   UINT32  cPot, cSensor[2][NSENSORSINBANK];
-  UINT32  *pADCBuff = (UINT32 *) &ADC1BUF0;
   UINT8   i;
   
-  LED_TRIS = 0;
+  LED_TRIS = 1;
   
-  PWR_BANK0_TRIS = 0;
-  PWR_BANK1_TRIS = 0;
+  PWR_BANK0_TRIS = 0;  // disable both banks to start
+ 
+  PWR_BANK1_TRIS = 1;
 
   UART2_RX_PPS_REG = UART2_RX_PPS_ITM;
   UART2_TX_PPS_REG = UART2_TX_PPS_ITM;
@@ -104,14 +99,14 @@ int main(void)
 
   // timer interrupt stuff...
 
-  // configure the core timer roll-over rate (1msec)
-  // tick = sys_freq / pb_div / prescale / toggles_per_sec
-  // = 8MHz / 1 / 64 / 1000 = 3125
+  // configure the core timer roll-over rate
+  // the internal source is the Peripheral Clock
+  // timer_preset = SYSCLK_freq / pb_div / additional prescale / desired_ticks_per_sec
 
   UINT16 timer_preset = (clock_interrupt_period_us * (FPB / 1000000)) / 8;
   OpenTimer1(T1_ON | T1_SOURCE_INT | T1_PS_1_8, timer_preset);
  
-  // set up the core timer interrupt with a prioirty of 2 and zero sub-priority
+  // set up timer interrupt with a priority of 2 and sub-priority of 0
   ConfigIntTimer1(T1_INT_ON | T1_INT_PRIOR_2);
 
   // enable multi-vector interrupts
@@ -229,34 +224,39 @@ int main(void)
 
   while(1) {
 
+    // enableADC is set periodically (ADC_interval_ms) by an interrupt service routine
     if (enableADC) {
-      snprintf (strBuf, bufLen, "ADC...\n");
-      SendDataBuffer (strBuf, strlen(strBuf));
+//      snprintf (strBuf, bufLen, "ADC...\n");
+//      SendDataBuffer (strBuf, strlen(strBuf));
       
       //*
       
       // NOTE: the interrupt routine set AD1CON1bits.SAMP = 1;
       // use AN0, pin 2
       
-      // wait for the conversion to complete so there will be vaild data in ADC result registers
+      // wait for the conversions to complete
+      // so there will be vaild data in ADC result registers
       while ( ! AD1CON1bits.DONE );
   
       for (i = 0; i < NSENSORSINBANK; i++) {
-        cSensor[bank][i] = pADCBuff[i];
+        cSensor[bank][i] = ReadADC10(i);
       }
       cPot = POT_ADC_VAL;
 
       // current setup has 5 sensors:
       //   2 in bank 0
       //   3 in bank 1
-      snprintf (strBuf, bufLen, "%2d %4d %4d %4d %4d %4d\n", bank,
-        cSensor[0][0],
-        cSensor[0][1],
-        cSensor[1][0],
-        cSensor[1][1],
-        cSensor[1][2],
-        cPot);
-      SendDataBuffer (strBuf, strlen(strBuf));
+      if (enablePrint) {
+        snprintf (strBuf, bufLen, "%8d %8d %8d %8d %8d %8d\n", 
+          cSensor[0][0],
+          cSensor[0][1],
+          cSensor[1][0],
+          cSensor[1][1],
+          cSensor[1][2],
+          cPot);
+        SendDataBuffer (strBuf, strlen(strBuf));
+        enablePrint = 0;
+      }
  
       //*/
 
@@ -264,28 +264,37 @@ int main(void)
       enableADC = 0;
       bank = 1 - bank;
       // power up the new bank
-      PWR_BANK0 = 1 - bank;
-      PWR_BANK1 = bank;
+      if (bank == 0) {
+        PWR_BANK1 = 0;
+        PWR_BANK1_TRIS = 1;
+        PWR_BANK0 = 1;
+        PWR_BANK0_TRIS = 0;
+      } else {
+        PWR_BANK0 = 0;
+        PWR_BANK0_TRIS = 1;
+        PWR_BANK1 = 1;
+        PWR_BANK1_TRIS = 0;
+      }
 
       // time for new bank to stabilize is controlled by sampling interval
-    }
-  }
+    }  // ADC enabled
+  }  // infinite loop
 
   return -1;
 }
 
 void __ISR(_TIMER_1_VECTOR, ipl2) _Timer1Handler(void)
 {
-  // these interrupts should hit every 1 ms
+  // this interrupt should fire every 1 ms
   static int blinkRemainingUs = 0;
   static int adcRemainingUs = 0;
+  static int printRemainingUs = print_interval_ms;
 
   blinkRemainingUs -= clock_interrupt_period_us;
   if (blinkRemainingUs <= 0) {
     LED = 1 - LED;
-    blinkRemainingUs = LED_blink_period_ms * 500;
+    blinkRemainingUs = LED_blink_period_ms * 1000;
   }
-
   adcRemainingUs -= clock_interrupt_period_us;
   if (adcRemainingUs <= 0) {
     enableADC = 1;
@@ -293,5 +302,11 @@ void __ISR(_TIMER_1_VECTOR, ipl2) _Timer1Handler(void)
     adcRemainingUs = ADC_interval_ms * 1000;
   }
   
+  printRemainingUs -= clock_interrupt_period_us;
+  if (printRemainingUs <= 0) {
+    enablePrint = 1;
+    printRemainingUs = print_interval_ms * 1000;
+  }
+
   mT1ClearIntFlag(); // clear the interrupt flag
 }

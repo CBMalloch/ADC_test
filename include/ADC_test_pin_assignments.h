@@ -1,5 +1,5 @@
 /*
-** SONUS32_pin_assignments.h   M5 SONUS32 project
+** ADC_test_pin_assignments.h
 **
 ** 2012-04-15 v0.3 cbm
 **
@@ -31,7 +31,7 @@
 
 #include <p32xxxx.h>
 
-#define LED                   _RB5
+#define LED                   _LATB5
 #define LED_TRIS              _TRISB5
 
 #define BTN                   _RB7
@@ -48,15 +48,13 @@
 #define POT_ADC_ITM           (1 << 11)
 #define POT_ADC_VAL           ADC1BUF4
 
-#define PWR_BANK0             _RB14
+#define PWR_BANK0             _LATB14
 #define PWR_BANK0_TRIS        _TRISB14
-#define PWR_BANK1             _RB15
+#define PWR_BANK1             _LATB15
 #define PWR_BANK1_TRIS        _TRISB15
 
-// #define UART2_SFR             RPxx
 #define UART2_RX_PPS_REG      U2RXRbits.U2RXR
 #define UART2_RX_PPS_ITM      0x03
-// #define UART2_SDO_TRIS        _TRISxx
 
 #define UART2_TX_PPS_REG      RPB10Rbits.RPB10R
 #define UART2_TX_PPS_ITM      0x02
